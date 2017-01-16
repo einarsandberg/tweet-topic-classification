@@ -6,7 +6,6 @@ from nltk.corpus import stopwords
 
 
 def fetch_tweets(api, csv_writer):
-    file = open('tweets.csv', 'a')
     for tweet in tweepy.Cursor(api.home_timeline).items(10000):
         if is_english(tweet.text):
             csv_writer.writerow([tweet.text])
