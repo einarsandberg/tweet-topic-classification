@@ -8,7 +8,7 @@ from nltk.corpus import stopwords
 def fetch_friends_tweets(api, csv_writer):
     for friend in tweepy.Cursor(api.friends).items(626):
         if (friend.lang == "en"):
-            stuff = api.user_timeline(id=friend.id, count=50, include_rts = False, exclude_replies=True)
+            stuff = api.user_timeline(id=friend.id, count=400, include_rts = True, exclude_replies=False)
             for status in stuff:
                 if(is_english(status.text)):
                     csv_writer.writerow([status.text])

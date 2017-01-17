@@ -18,7 +18,7 @@ from nltk import word_tokenize,sent_tokenize
 
 #read_tweets(csv_writer_en)
 file = open('help.txt', 'r')
-tweets_file = open('friends_tweets.csv', 'a')
+tweets_file = open('friends_tweets2.csv', 'a')
 lines = file.readlines()
 consumer_key = lines[0].rstrip()
 consumer_secret = lines[1].rstrip()
@@ -27,7 +27,7 @@ access_secret = lines[3].rstrip()
 auth = OAuthHandler(consumer_key, consumer_secret)
 auth.set_access_token(access_token, access_secret)
 csv_writer = csv.writer(tweets_file)
-csv_reader = csv.reader(open('friends_tweets.csv'))
+csv_reader = csv.reader(open('friends_tweets2.csv'))
 api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 lemmatizer = WordNetLemmatizer()
 stop_en = set(stopwords.words('english'))
@@ -58,7 +58,9 @@ def clean_tweets(tweets):
     cleaned_tweets = []
     for i in range(0, len(tweets)):
         no_links = re.sub(r"http\S+", "", tweets[i])
-        no_RT = no_links.lower().replace('rt', '')
+        no_reply = re.sub('(?<=@)[^\s]+', '', no_links)
+        no_reply = no_reply.replace('@', '')
+        no_RT = no_reply.lower().replace('rt', '')
         no_amp = no_RT.replace('&amp', '')
         no_stop = " ".join([i for i in no_amp.lower().split() if i not in stop_en])
         no_punc = ''.join(ch for ch in no_stop if ch not in set(string.punctuation))
@@ -80,7 +82,23 @@ def get_document_topics(tweets, ldamodel, doc_term_matrix):
                              "topic_probability": sorted_by_value[0][1]}
         categorized_tweets.append(categorized_tweet)
 
+
+    print_similar_tweets(categorized_tweets)
     return categorized_tweets
+
+
+def print_similar_tweets(tweets):
+    # Go through all tweets and print them to files named "topic" + topicID
+    topic_ids = []
+    for i in range(0, len(tweets)):
+        with open("topic"+str(tweets[i]["topic_id"])+".csv", 'a') as csv_file:
+            writer = csv.writer(csv_file)
+            print(tweets[i]["processed_tweet"])
+            if (tweets[i]["topic_id"] not in topic_ids):
+                writer.writerow(tweets[i]["topic_words"])
+                topic_ids.append(tweets[i]["topic_id"])
+
+            writer.writerow([tweets[i]["processed_tweet"]])
 
 
 def extract_nouns(tweets):
@@ -111,10 +129,11 @@ def train_model():
     cleaned_tweets = clean_tweets(tweets)
     nouns = extract_nouns(cleaned_tweets)
     dictionary = corpora.Dictionary(nouns)
-    dictionary.filter_extremes(no_below=40, no_above=0.6)
+    dictionary.filter_extremes(no_below=20, no_above=0.7)
     doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in nouns]
     lda = gensim.models.ldamodel.LdaModel
-    ldamodel = lda(doc_term_matrix, num_topics=10, alpha=0.001, id2word=dictionary, passes=100)
+    #test alpha = 0.5
+    ldamodel = lda(doc_term_matrix, num_topics=40, alpha=0.001, id2word=dictionary, passes=50)
     ldamodel.save('model.lda')
     dictionary.save("dictionary.dict")
     categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, doc_term_matrix)
@@ -123,11 +142,8 @@ def train_model():
 
 def run_model():
     tweets = read_my_tweets()
-    text = ["Liverpool won 4-0 against Manchester City. Klopp is happy."]
-
     cleaned_tweets = clean_tweets(tweets)
     nouns_list = extract_nouns(cleaned_tweets)
-    print(nouns_list)
     ldamodel = gensim.models.LdaModel.load('model.lda')
     dictionary = corpora.Dictionary.load("dictionary.dict")
     new_ldas = []
@@ -149,3 +165,4 @@ def run_model():
 #train_model()
 run_model()
 
+# Testa att skriva ut alla tweets för samma topic.
