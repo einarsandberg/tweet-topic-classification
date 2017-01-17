@@ -5,8 +5,17 @@ import csv
 from nltk.corpus import stopwords
 
 
-def fetch_tweets(api, csv_writer):
-    for tweet in tweepy.Cursor(api.home_timeline).items(10000):
+def fetch_friends_tweets(api, csv_writer):
+    for friend in tweepy.Cursor(api.friends).items(626):
+        if (friend.lang == "en"):
+            stuff = api.user_timeline(id=friend.id, count=50, include_rts = False, exclude_replies=True)
+            for status in stuff:
+                if(is_english(status.text)):
+                    csv_writer.writerow([status.text])
+
+
+def fetch_timeline_tweets(api, csv_writer):
+    for tweet in tweepy.Cursor(api.home_timeline).items(400):
         if is_english(tweet.text):
             csv_writer.writerow([tweet.text])
 

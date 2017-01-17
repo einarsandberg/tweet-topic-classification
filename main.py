@@ -13,11 +13,12 @@ from gensim import corpora
 from nltk.stem.wordnet import WordNetLemmatizer
 import re
 import preprocess
+from nltk import word_tokenize,sent_tokenize
 
 
 #read_tweets(csv_writer_en)
 file = open('help.txt', 'r')
-tweets_file = open('tweets.csv', 'a')
+tweets_file = open('friends_tweets.csv', 'a')
 lines = file.readlines()
 consumer_key = lines[0].rstrip()
 consumer_secret = lines[1].rstrip()
@@ -26,7 +27,7 @@ access_secret = lines[3].rstrip()
 auth = OAuthHandler(consumer_key, consumer_secret)
 auth.set_access_token(access_token, access_secret)
 csv_writer = csv.writer(tweets_file)
-csv_reader = csv.reader(open('tweets.csv'))
+csv_reader = csv.reader(open('friends_tweets.csv'))
 api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 lemmatizer = WordNetLemmatizer()
 stop_en = set(stopwords.words('english'))
@@ -35,12 +36,23 @@ def read_tweets():
     count = 0
     tweets = []
     for row in csv_reader:
-        tweets.append(row[0])
-        #count= count+1
-        #if (count == 20):
-         #   break
+        # clear out some swedish tweets
+        if ("å" not in row[0] and "ä" not in row[0] and "ö" not in row[0]):
+            tweets.append(row[0])
 
     return tweets
+
+
+def read_my_tweets():
+    reader = csv.reader(open("my_tweets.csv"))
+    tweets = []
+    for row in reader:
+        # clear out some swedish tweets
+        if ("å" not in row[0] and "ä" not in row[0] and "ö" not in row[0]):
+            tweets.append(row[0])
+
+    return tweets
+
 
 def clean_tweets(tweets):
     cleaned_tweets = []
@@ -55,13 +67,15 @@ def clean_tweets(tweets):
 
     return cleaned_tweets
 
-def get_document_topics(tweets):
+
+def get_document_topics(tweets, ldamodel, doc_term_matrix):
     categorized_tweets = []
     categorized_tweet = {}
+
     for i in range(0, len(tweets)):
         topics = ldamodel.get_document_topics(doc_term_matrix[i])
         sorted_by_value = sorted(topics, key=lambda tup: tup[1], reverse=True)
-        categorized_tweet = {"text": tweets[i], "topic_id": sorted_by_value[0][0],
+        categorized_tweet = {"processed_tweet": tweets[i], "topic_id": sorted_by_value[0][0],
                              "topic_words": ldamodel.show_topic(sorted_by_value[0][0], topn=3),
                              "topic_probability": sorted_by_value[0][1]}
         categorized_tweets.append(categorized_tweet)
@@ -69,28 +83,69 @@ def get_document_topics(tweets):
     return categorized_tweets
 
 
-#preprocess.fetch_tweets(api, csv_writer)
-tweets = read_tweets()
+def extract_nouns(tweets):
+    nouns_list = []
+    for tweet in tweets:
+        sentences = nltk.sent_tokenize(tweet)
+        nouns = []
+        for sentence in sentences:
+            for word, pos in nltk.pos_tag(nltk.word_tokenize(str(sentence))):
+                if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS'):
+                    nouns.append(word)
 
-cleaned_tweets = clean_tweets(tweets)
-tweet_tokens = [tweet.split() for tweet in cleaned_tweets]
+        nouns_list.append(nouns)
 
-dictionary = corpora.Dictionary(tweet_tokens)
-doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in tweet_tokens]
-#print(doc_term_matrix)
-#print(dictionary.token2id)
-lda = gensim.models.ldamodel.LdaModel
-#ldamodel = lda(doc_term_matrix, num_topics=10, id2word = dictionary, passes=50)
-#ldamodel.save('model.lda')
-ldamodel = gensim.models.LdaModel.load('model.lda')
-
-print(ldamodel.print_topics(num_topics=10, num_words=3))
-print(cleaned_tweets[3])
-#print(ldamodel.get_document_topics(doc_term_matrix[3]))
+    return nouns_list
 
 
-categorized_tweets = get_document_topics(cleaned_tweets)
-print(categorized_tweets)
+def save_categorized_tweets(tweets, file_name):
+    with open(file_name, 'w') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(list(tweets[0].keys()))
+        for tweet in tweets:
+            writer.writerow(list(tweet.values()))
 
-def save_categorized_tweets():
+
+def train_model():
+    tweets = read_tweets()
+    cleaned_tweets = clean_tweets(tweets)
+    nouns = extract_nouns(cleaned_tweets)
+    dictionary = corpora.Dictionary(nouns)
+    dictionary.filter_extremes(no_below=40, no_above=0.6)
+    doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in nouns]
+    lda = gensim.models.ldamodel.LdaModel
+    ldamodel = lda(doc_term_matrix, num_topics=10, alpha=0.001, id2word=dictionary, passes=100)
+    ldamodel.save('model.lda')
+    dictionary.save("dictionary.dict")
+    categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, doc_term_matrix)
+    save_categorized_tweets(categorized_tweets, "trained_categorized_tweets.csv")
+
+
+def run_model():
+    tweets = read_my_tweets()
+    text = ["Liverpool won 4-0 against Manchester City. Klopp is happy."]
+
+    cleaned_tweets = clean_tweets(tweets)
+    nouns_list = extract_nouns(cleaned_tweets)
+    print(nouns_list)
+    ldamodel = gensim.models.LdaModel.load('model.lda')
+    dictionary = corpora.Dictionary.load("dictionary.dict")
+    new_ldas = []
+    for nouns in nouns_list:
+        new_bow = dictionary.doc2bow(nouns)
+        new_ldas.append(ldamodel[new_bow])
+
+
+    categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, new_ldas)
+    save_categorized_tweets(categorized_tweets, "my_categorized_tweets.csv")
+
+
+
+
+
+#preprocess.fetch_friends_tweets(api, csv_writer)
+
+
+#train_model()
+run_model()
 
