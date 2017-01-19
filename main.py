@@ -11,10 +11,11 @@ import lda.datasets
 import gensim
 from gensim import corpora
 from nltk.stem.wordnet import WordNetLemmatizer
+from nltk.corpus import wordnet
 import re
 import preprocess
 from nltk import word_tokenize,sent_tokenize
-
+from nltk import SnowballStemmer
 
 #read_tweets(csv_writer_en)
 file = open('help.txt', 'r')
@@ -30,8 +31,8 @@ csv_writer = csv.writer(tweets_file)
 csv_reader = csv.reader(open('friends_tweets2.csv'))
 api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 lemmatizer = WordNetLemmatizer()
+stemmer = SnowballStemmer("english")
 stop_en = set(stopwords.words('english'))
-
 def read_tweets():
     count = 0
     tweets = []
@@ -60,15 +61,56 @@ def clean_tweets(tweets):
         no_links = re.sub(r"http\S+", "", tweets[i])
         no_reply = re.sub('(?<=@)[^\s]+', '', no_links)
         no_reply = no_reply.replace('@', '')
-        no_RT = no_reply.lower().replace('rt', '')
-        no_amp = no_RT.replace('&amp', '')
+        # RT followed by whitespace ONLY. to avoid filtering out e.g RT in "NORTH"
+        no_RT = no_reply.replace('RT ', '')
+        no_amp = no_RT.lower().replace('&amp', '')
         no_stop = " ".join([i for i in no_amp.lower().split() if i not in stop_en])
         no_punc = ''.join(ch for ch in no_stop if ch not in set(string.punctuation))
-        lemmatized = " ".join(lemmatizer.lemmatize(word) for word in no_punc.split())
-        cleaned_tweets.append(lemmatized)
+        #stemmed = " ".join(stemmer.stem(word) for word in no_punc.split())
+        pos_tag = nltk.pos_tag(word_tokenize(no_punc))
+        lemmas = []
+        print(no_punc)
+        for i in range(0, len(pos_tag)):
+            # lemmatization for nouns, verbs, adverbs and adjectives
+            if(penn_to_wn(pos_tag[i][1]) != None):
+                lemmas.append(lemmatizer.lemmatize(pos_tag[i][0], pos=penn_to_wn(pos_tag[i][1])))
+            else:
+                lemmas.append(pos_tag[i][0])
+
+
+        cleaned = " ".join(lemma for lemma in lemmas)
+        print(cleaned)
+        cleaned_tweets.append(no_punc)
 
     return cleaned_tweets
 
+
+def is_noun(tag):
+    return tag in ['NN', 'NNS', 'NNP', 'NNPS']
+
+
+def is_verb(tag):
+    return tag in ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ']
+
+
+def is_adverb(tag):
+    return tag in ['RB', 'RBR', 'RBS']
+
+
+def is_adjective(tag):
+    return tag in ['JJ', 'JJR', 'JJS']
+
+
+def penn_to_wn(tag):
+    if is_adjective(tag):
+        return wordnet.ADJ
+    elif is_noun(tag):
+        return wordnet.NOUN
+    elif is_adverb(tag):
+        return wordnet.ADV
+    elif is_verb(tag):
+        return wordnet.VERB
+    return None
 
 def get_document_topics(tweets, ldamodel, doc_term_matrix):
     categorized_tweets = []
@@ -78,24 +120,21 @@ def get_document_topics(tweets, ldamodel, doc_term_matrix):
         topics = ldamodel.get_document_topics(doc_term_matrix[i])
         sorted_by_value = sorted(topics, key=lambda tup: tup[1], reverse=True)
         categorized_tweet = {"processed_tweet": tweets[i], "topic_id": sorted_by_value[0][0],
-                             "topic_words": ldamodel.show_topic(sorted_by_value[0][0], topn=3),
+                             "topic_words": ldamodel.show_topic(sorted_by_value[0][0], topn=5),
                              "topic_probability": sorted_by_value[0][1]}
         categorized_tweets.append(categorized_tweet)
 
-
-    print_similar_tweets(categorized_tweets)
     return categorized_tweets
 
 
-def print_similar_tweets(tweets):
+def save_similar_tweets(tweets):
     # Go through all tweets and print them to files named "topic" + topicID
     topic_ids = []
     for i in range(0, len(tweets)):
         with open("topic"+str(tweets[i]["topic_id"])+".csv", 'a') as csv_file:
             writer = csv.writer(csv_file)
-            print(tweets[i]["processed_tweet"])
             if (tweets[i]["topic_id"] not in topic_ids):
-                writer.writerow(tweets[i]["topic_words"])
+                writer.writerow([tweets[i]["topic_words"]])
                 topic_ids.append(tweets[i]["topic_id"])
 
             writer.writerow([tweets[i]["processed_tweet"]])
@@ -109,7 +148,8 @@ def extract_nouns(tweets):
         for sentence in sentences:
             for word, pos in nltk.pos_tag(nltk.word_tokenize(str(sentence))):
                 if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS'):
-                    nouns.append(word)
+                    # Lemmatize AFTER determining if noun
+                    nouns.append(lemmatizer.lemmatize(word))
 
         nouns_list.append(nouns)
 
@@ -123,46 +163,62 @@ def save_categorized_tweets(tweets, file_name):
         for tweet in tweets:
             writer.writerow(list(tweet.values()))
 
+def lemmatize_tweets(tweets):
+    lemmatized_tweets = []
+    for i in range(0, len(tweets)):
+        lemmatized = " ".join(lemmatizer.lemmatize(word) for word in tweets[i].split())
+        lemmatized_tweets.append(lemmatized)
 
-def train_model():
+    return lemmatized_tweets
+
+def train_model(use_nouns):
     tweets = read_tweets()
     cleaned_tweets = clean_tweets(tweets)
-    nouns = extract_nouns(cleaned_tweets)
-    dictionary = corpora.Dictionary(nouns)
-    dictionary.filter_extremes(no_below=20, no_above=0.7)
-    doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in nouns]
+
+    if (use_nouns):
+        tweet_tokens = extract_nouns(cleaned_tweets)
+    else:
+        tweet_tokens = [tweet.split() for tweet in lemmatize_tweets(cleaned_tweets)]
+
+    dictionary = corpora.Dictionary(tweet_tokens)
+   # dictionary.filter_extremes(no_below=20, no_above=0.6)
+    doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in tweet_tokens]
     lda = gensim.models.ldamodel.LdaModel
-    #test alpha = 0.5
-    ldamodel = lda(doc_term_matrix, num_topics=40, alpha=0.001, id2word=dictionary, passes=50)
+
+    ldamodel = lda(doc_term_matrix, num_topics=20, alpha='auto', eta='auto', id2word=dictionary, passes=10)
     ldamodel.save('model.lda')
     dictionary.save("dictionary.dict")
     categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, doc_term_matrix)
     save_categorized_tweets(categorized_tweets, "trained_categorized_tweets.csv")
 
 
-def run_model():
+def run_model(use_nouns):
     tweets = read_my_tweets()
     cleaned_tweets = clean_tweets(tweets)
-    nouns_list = extract_nouns(cleaned_tweets)
+
+    if (use_nouns):
+        tweet_tokens = extract_nouns(cleaned_tweets)
+    else:
+        tweet_tokens = [tweet.split() for tweet in lemmatize_tweets(cleaned_tweets)]
+
     ldamodel = gensim.models.LdaModel.load('model.lda')
     dictionary = corpora.Dictionary.load("dictionary.dict")
     new_ldas = []
-    for nouns in nouns_list:
-        new_bow = dictionary.doc2bow(nouns)
+    for tokens in tweet_tokens:
+        new_bow = dictionary.doc2bow(tokens)
         new_ldas.append(ldamodel[new_bow])
 
-
     categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, new_ldas)
+    save_similar_tweets(categorized_tweets)
     save_categorized_tweets(categorized_tweets, "my_categorized_tweets.csv")
-
 
 
 
 
 #preprocess.fetch_friends_tweets(api, csv_writer)
 
+use_nouns = True
+train_model(use_nouns)
+#run_model(use_nouns)
 
-#train_model()
-run_model()
 
-# Testa att skriva ut alla tweets för samma topic.
