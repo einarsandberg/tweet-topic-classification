@@ -31,7 +31,6 @@ csv_writer = csv.writer(tweets_file)
 csv_reader = csv.reader(open('friends_tweets2.csv'))
 api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 lemmatizer = WordNetLemmatizer()
-stemmer = SnowballStemmer("english")
 stop_en = set(stopwords.words('english'))
 def read_tweets():
     count = 0
@@ -66,10 +65,8 @@ def clean_tweets(tweets):
         no_amp = no_RT.lower().replace('&amp', '')
         no_stop = " ".join([i for i in no_amp.lower().split() if i not in stop_en])
         no_punc = ''.join(ch for ch in no_stop if ch not in set(string.punctuation))
-        #stemmed = " ".join(stemmer.stem(word) for word in no_punc.split())
         pos_tag = nltk.pos_tag(word_tokenize(no_punc))
         lemmas = []
-        print(no_punc)
         for i in range(0, len(pos_tag)):
             # lemmatization for nouns, verbs, adverbs and adjectives
             if(penn_to_wn(pos_tag[i][1]) != None):
@@ -77,10 +74,8 @@ def clean_tweets(tweets):
             else:
                 lemmas.append(pos_tag[i][0])
 
-
-        cleaned = " ".join(lemma for lemma in lemmas)
-        print(cleaned)
-        cleaned_tweets.append(no_punc)
+        cleaned_tweet = " ".join(lemma for lemma in lemmas)
+        cleaned_tweets.append(cleaned_tweet)
 
     return cleaned_tweets
 
@@ -148,8 +143,7 @@ def extract_nouns(tweets):
         for sentence in sentences:
             for word, pos in nltk.pos_tag(nltk.word_tokenize(str(sentence))):
                 if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS'):
-                    # Lemmatize AFTER determining if noun
-                    nouns.append(lemmatizer.lemmatize(word))
+                    nouns.append(word)
 
         nouns_list.append(nouns)
 
@@ -163,43 +157,36 @@ def save_categorized_tweets(tweets, file_name):
         for tweet in tweets:
             writer.writerow(list(tweet.values()))
 
-def lemmatize_tweets(tweets):
-    lemmatized_tweets = []
-    for i in range(0, len(tweets)):
-        lemmatized = " ".join(lemmatizer.lemmatize(word) for word in tweets[i].split())
-        lemmatized_tweets.append(lemmatized)
 
-    return lemmatized_tweets
-
-def train_model(use_nouns):
+def train_model(nouns_only):
     tweets = read_tweets()
     cleaned_tweets = clean_tweets(tweets)
 
-    if (use_nouns):
+    if (nouns_only):
         tweet_tokens = extract_nouns(cleaned_tweets)
     else:
-        tweet_tokens = [tweet.split() for tweet in lemmatize_tweets(cleaned_tweets)]
+        tweet_tokens = [tweet.split() for tweet in cleaned_tweets]
 
     dictionary = corpora.Dictionary(tweet_tokens)
-   # dictionary.filter_extremes(no_below=20, no_above=0.6)
+    dictionary.filter_extremes(no_below=20, no_above=0.6)
     doc_term_matrix = [dictionary.doc2bow(tokens) for tokens in tweet_tokens]
     lda = gensim.models.ldamodel.LdaModel
 
-    ldamodel = lda(doc_term_matrix, num_topics=20, alpha='auto', eta='auto', id2word=dictionary, passes=10)
+    ldamodel = lda(doc_term_matrix, num_topics=25, alpha='auto', eta='auto', id2word=dictionary, passes=20)
     ldamodel.save('model.lda')
     dictionary.save("dictionary.dict")
     categorized_tweets = get_document_topics(cleaned_tweets, ldamodel, doc_term_matrix)
     save_categorized_tweets(categorized_tweets, "trained_categorized_tweets.csv")
 
 
-def run_model(use_nouns):
+def run_model(nouns_only):
     tweets = read_my_tweets()
     cleaned_tweets = clean_tweets(tweets)
 
-    if (use_nouns):
+    if (nouns_only):
         tweet_tokens = extract_nouns(cleaned_tweets)
     else:
-        tweet_tokens = [tweet.split() for tweet in lemmatize_tweets(cleaned_tweets)]
+        tweet_tokens = [tweet.split() for tweet in cleaned_tweets ]
 
     ldamodel = gensim.models.LdaModel.load('model.lda')
     dictionary = corpora.Dictionary.load("dictionary.dict")
@@ -213,12 +200,11 @@ def run_model(use_nouns):
     save_categorized_tweets(categorized_tweets, "my_categorized_tweets.csv")
 
 
-
-
 #preprocess.fetch_friends_tweets(api, csv_writer)
 
-use_nouns = True
-train_model(use_nouns)
-#run_model(use_nouns)
+only_nouns = True
+train_model(only_nouns)
+run_model(only_nouns)
+
 
 
